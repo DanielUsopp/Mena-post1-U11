@@ -1,8 +1,8 @@
 package com.tienda.pedidos;
 
+import com.tienda.pedidos.entity.Pedido;
+import com.tienda.pedidos.repository.PedidoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.BeanPropertyRowMapper;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 public class PedidoController {
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private PedidoRepository repo;
 
     @PostMapping
     public Pedido crearPedido(@RequestBody Pedido pedido) {
@@ -44,12 +44,8 @@ public class PedidoController {
         pedido.setFechaCreacion(LocalDateTime.now());
         pedido.setNotasInternas("Pedido creado automaticamente, revisar stock antes de despachar");
 
-        // 3. Persistir con SQL embebido y concatenado directamente en el controller
-        String sql = "INSERT INTO pedido (cliente_email, tipo_cliente, subtotal, descuento, iva, total, "
-                    + "estado, notas_internas, fecha_creacion) VALUES ('" + pedido.getClienteEmail() + "', '"
-                    + pedido.getTipoCliente() + "', " + pedido.getSubtotal() + ", " + descuento + ", " + iva
-                    + ", " + total + ", 'CREADO', '" + pedido.getNotasInternas() + "', NOW())";
-        jdbcTemplate.update(sql);
+        // 3. Persistir con el repositorio (ya sin SQL escrito a mano)
+        pedido = repo.save(pedido);
 
         // 4. Enviar correo de confirmacion — dependencia creada con "new", no inyectada
         NotificacionEmailService notificador = new NotificacionEmailService();
@@ -64,12 +60,6 @@ public class PedidoController {
 
     @GetMapping("/{id}")
     public Pedido obtenerPedido(@PathVariable Long id) {
-        try {
-            String sql = "SELECT * FROM pedido WHERE id = " + id;
-            return jdbcTemplate.queryForObject(sql, new BeanPropertyRowMapper<>(Pedido.class));
-        } catch (Exception e) {
-            System.out.println("Error: " + e.getMessage());
-            return null; // el cliente recibe 200 OK con cuerpo vacio en vez de 404
-        }
+        return repo.findById(id).orElse(null); // todavia responde 200 vacio en vez de 404
     }
 }

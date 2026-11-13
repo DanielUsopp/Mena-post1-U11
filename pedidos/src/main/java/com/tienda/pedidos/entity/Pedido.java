@@ -1,4 +1,4 @@
-package com.tienda.pedidos;
+package com.tienda.pedidos.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
