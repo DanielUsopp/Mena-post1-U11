@@ -6,6 +6,8 @@ import com.tienda.pedidos.entity.Pedido;
 import com.tienda.pedidos.exception.RecursoNoEncontradoException;
 import com.tienda.pedidos.repository.PedidoRepository;
 import com.tienda.pedidos.strategy.EstrategiaDescuento;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -15,6 +17,7 @@ import java.util.Map;
 @Service
 public class PedidoServiceImpl implements PedidoService {
 
+    private static final Logger log = LoggerFactory.getLogger(PedidoServiceImpl.class);
     private static final double TASA_IVA = 0.19;
 
     private final PedidoRepository repo;
@@ -34,9 +37,19 @@ public class PedidoServiceImpl implements PedidoService {
 
     @Override
     public PedidoResponseDTO crear(PedidoRequestDTO dto) {
-        EstrategiaDescuento estrategia = estrategias.getOrDefault(
-                dto.getTipoCliente().toUpperCase(), estrategias.get("REGULAR"));
+        log.info("Creando pedido: clienteEmail={}, tipoCliente={}",
+                dto.getClienteEmail(), dto.getTipoCliente());
+
+        String tipo = dto.getTipoCliente().toUpperCase();
+        if (!estrategias.containsKey(tipo)) {
+            log.warn("tipoCliente={} no reconocido para clienteEmail={}, se aplica REGULAR",
+                    dto.getTipoCliente(), dto.getClienteEmail());
+        }
+        EstrategiaDescuento estrategia = estrategias.getOrDefault(tipo, estrategias.get("REGULAR"));
         double descuento = estrategia.calcularDescuento(dto.getSubtotal());
+        // Unico punto de auditoria del descuento (no se loguea dentro de cada Strategy)
+        log.info("Descuento aplicado: pedido para clienteEmail={}, tipoCliente={}, descuento={}",
+                dto.getClienteEmail(), dto.getTipoCliente(), descuento);
         double baseConDescuento = dto.getSubtotal() - descuento;
         double iva = baseConDescuento * TASA_IVA;
         double total = baseConDescuento + iva;
@@ -53,19 +66,31 @@ public class PedidoServiceImpl implements PedidoService {
         pedido.setFechaCreacion(LocalDateTime.now());
 
         Pedido guardado = repo.save(pedido);
-        notificador.enviarConfirmacion(guardado.getClienteEmail(), guardado.getTotal());
+        log.info("Pedido creado exitosamente con id={}, total={}", guardado.getId(), guardado.getTotal());
+
+        try {
+            notificador.enviarConfirmacion(guardado.getClienteEmail(), guardado.getTotal());
+        } catch (RuntimeException e) {
+            // El pedido ya quedo guardado: un fallo del correo no debe convertir
+            // la respuesta en un 500, pero si debe quedar registrado como ERROR
+            log.error("No se pudo enviar la confirmacion del pedido id={}", guardado.getId(), e);
+        }
         return toResponseDTO(guardado);
     }
 
     @Override
     public PedidoResponseDTO buscarPorId(Long id) {
-        Pedido p = repo.findById(id)
-                .orElseThrow(() -> new RecursoNoEncontradoException("Pedido", id));
+        log.debug("Buscando pedido con id={}", id);
+        Pedido p = repo.findById(id).orElseThrow(() -> {
+            log.warn("Pedido con id={} no encontrado", id);
+            return new RecursoNoEncontradoException("Pedido", id);
+        });
         return toResponseDTO(p);
     }
 
     @Override
     public List<PedidoResponseDTO> listarPorCliente(String clienteEmail) {
+        log.debug("Listando pedidos de clienteEmail={}", clienteEmail);
         return repo.findByClienteEmail(clienteEmail).stream()
                 .map(this::toResponseDTO)
                 .toList();
