@@ -5,10 +5,12 @@ import com.tienda.pedidos.dto.PedidoResponseDTO;
 import com.tienda.pedidos.entity.Pedido;
 import com.tienda.pedidos.exception.RecursoNoEncontradoException;
 import com.tienda.pedidos.repository.PedidoRepository;
+import com.tienda.pedidos.strategy.EstrategiaDescuento;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class PedidoServiceImpl implements PedidoService {
@@ -17,16 +19,24 @@ public class PedidoServiceImpl implements PedidoService {
 
     private final PedidoRepository repo;
     private final NotificacionService notificador;
+    // Spring llena el mapa con todos los beans EstrategiaDescuento, usando
+    // el nombre del bean (REGULAR, VIP, MAYORISTA) como llave
+    private final Map<String, EstrategiaDescuento> estrategias;
 
     // Todas las dependencias llegan por constructor: ya no hay "new" de colaboradores
-    public PedidoServiceImpl(PedidoRepository repo, NotificacionService notificador) {
+    public PedidoServiceImpl(PedidoRepository repo,
+                             NotificacionService notificador,
+                             Map<String, EstrategiaDescuento> estrategias) {
         this.repo = repo;
         this.notificador = notificador;
+        this.estrategias = estrategias;
     }
 
     @Override
     public PedidoResponseDTO crear(PedidoRequestDTO dto) {
-        double descuento = calcularDescuento(dto.getTipoCliente(), dto.getSubtotal());
+        EstrategiaDescuento estrategia = estrategias.getOrDefault(
+                dto.getTipoCliente().toUpperCase(), estrategias.get("REGULAR"));
+        double descuento = estrategia.calcularDescuento(dto.getSubtotal());
         double baseConDescuento = dto.getSubtotal() - descuento;
         double iva = baseConDescuento * TASA_IVA;
         double total = baseConDescuento + iva;
@@ -59,16 +69,6 @@ public class PedidoServiceImpl implements PedidoService {
         return repo.findByClienteEmail(clienteEmail).stream()
                 .map(this::toResponseDTO)
                 .toList();
-    }
-
-    // Pendiente: este if/else se reemplaza por el patron Strategy (Checkpoint 3)
-    private double calcularDescuento(String tipoCliente, double subtotal) {
-        if ("VIP".equalsIgnoreCase(tipoCliente)) {
-            return subtotal * 0.15;
-        } else if ("MAYORISTA".equalsIgnoreCase(tipoCliente)) {
-            return subtotal * 0.25;
-        }
-        return 0.0;
     }
 
     private PedidoResponseDTO toResponseDTO(Pedido p) {
